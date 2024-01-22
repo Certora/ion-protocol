@@ -53,6 +53,8 @@ The Formal Verification (FV) component of the contest is about using the Certora
 - Real bug rewards will be awarded for properties that are violated because of the bug. Only the bug submitter can submit a spec for that bug. 25, 12, or 1 points will be allocated based on the severity of the bug (H/M/L).
 
 ## Submission Guidelines
+- **Submission**: 
+  - Make sure to submit a vulnerability with FV severity on hats, adding the link to your private repo in the description. The main purpose of this is to get your wallet address for rewards.
 - **Development Constraints**:
   - Participants are allowed to create and modify configuration, harnesses, and specification files.
     - Some conf files have commented out settings which can be used to help with running time.
