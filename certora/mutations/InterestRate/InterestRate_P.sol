@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: BUSL-1.1
 pragma solidity 0.8.21;
 
-import { IYieldOracle } from "src/interfaces/IYieldOracle.sol";
-import { WadRayMath } from "src/libraries/math/WadRayMath.sol";
+import { IYieldOracle } from "./interfaces/IYieldOracle.sol";
+import { WadRayMath, RAY } from "./libraries/math/WadRayMath.sol";
 
 // forgefmt: disable-start
 
@@ -71,47 +71,77 @@ uint8 constant MINIMUM_ABOVE_KINK_SLOPE_SHIFT = 96;
 
 uint48 constant SECONDS_IN_A_YEAR = 31_536_000;
 
+/**
+ * @notice An external contract that provides the APY for each collateral type.
+ * A modular design here allows for updating of the parameters at a later date
+ * without upgrading the core protocol.
+ *
+ * @dev Each collateral has its own interest rate model, and every operation on
+ * the `IonPool` (lend, withdraw, borrow, repay) will alter the interest rate
+ * for all collaterals. Therefore, before every operation, the previous interest
+ * rate must be accrued. Ion determines the interest rate for each collateral
+ * based on various collateral-specific parameters which must be stored
+ * on-chain. However, to iterate through all these parameters as contract
+ * storage on every operation introduces an immense gas overhead, especially as
+ * more collaterals are listed on Ion. Therefore, this contract is heavily
+ * optimized to reduce storage reads at the unfortunate cost of code-complexity.
+ *
+ * @custom:security-contact security@molecularlabs.io
+ */
 contract InterestRate {
     using WadRayMath for *;
 
     error CollateralIndexOutOfBounds();
     error DistributionFactorsDoNotSumToOne(uint256 sum);
     error TotalDebtsLength(uint256 COLLATERAL_COUNT, uint256 totalIlkDebtsLength);
+
+    error InvalidMinimumKinkRate(uint256 minimumKinkRate, uint256 minimumBaseRate);
+    error InvalidIlkDataListLength(uint256 length);
+    error InvalidOptimalUtilizationRate(uint256 optimalUtilizationRate);
+    error InvalidReserveFactor(uint256 reserveFactor);
     error InvalidYieldOracleAddress();
+
+    uint256 private constant MAX_ILKS = 8;
 
     /**
      * @dev Packed collateral configs
      */
-    uint256 internal immutable ILKCONFIG_0A;
-    uint256 internal immutable ILKCONFIG_0B;
-    uint256 internal immutable ILKCONFIG_0C;
-    uint256 internal immutable ILKCONFIG_1A;
-    uint256 internal immutable ILKCONFIG_1B;
-    uint256 internal immutable ILKCONFIG_1C;
-    uint256 internal immutable ILKCONFIG_2A;
-    uint256 internal immutable ILKCONFIG_2B;
-    uint256 internal immutable ILKCONFIG_2C;
-    uint256 internal immutable ILKCONFIG_3A;
-    uint256 internal immutable ILKCONFIG_3B;
-    uint256 internal immutable ILKCONFIG_3C;
-    uint256 internal immutable ILKCONFIG_4A;
-    uint256 internal immutable ILKCONFIG_4B;
-    uint256 internal immutable ILKCONFIG_4C;
-    uint256 internal immutable ILKCONFIG_5A;
-    uint256 internal immutable ILKCONFIG_5B;
-    uint256 internal immutable ILKCONFIG_5C;
-    uint256 internal immutable ILKCONFIG_6A;
-    uint256 internal immutable ILKCONFIG_6B;
-    uint256 internal immutable ILKCONFIG_6C;
-    uint256 internal immutable ILKCONFIG_7A;
-    uint256 internal immutable ILKCONFIG_7B;
-    uint256 internal immutable ILKCONFIG_7C;
+    uint256 private immutable ILKCONFIG_0A;
+    uint256 private immutable ILKCONFIG_0B;
+    uint256 private immutable ILKCONFIG_0C;
+    uint256 private immutable ILKCONFIG_1A;
+    uint256 private immutable ILKCONFIG_1B;
+    uint256 private immutable ILKCONFIG_1C;
+    uint256 private immutable ILKCONFIG_2A;
+    uint256 private immutable ILKCONFIG_2B;
+    uint256 private immutable ILKCONFIG_2C;
+    uint256 private immutable ILKCONFIG_3A;
+    uint256 private immutable ILKCONFIG_3B;
+    uint256 private immutable ILKCONFIG_3C;
+    uint256 private immutable ILKCONFIG_4A;
+    uint256 private immutable ILKCONFIG_4B;
+    uint256 private immutable ILKCONFIG_4C;
+    uint256 private immutable ILKCONFIG_5A;
+    uint256 private immutable ILKCONFIG_5B;
+    uint256 private immutable ILKCONFIG_5C;
+    uint256 private immutable ILKCONFIG_6A;
+    uint256 private immutable ILKCONFIG_6B;
+    uint256 private immutable ILKCONFIG_6C;
+    uint256 private immutable ILKCONFIG_7A;
+    uint256 private immutable ILKCONFIG_7B;
+    uint256 private immutable ILKCONFIG_7C;
 
     uint256 public immutable COLLATERAL_COUNT;
     IYieldOracle public immutable YIELD_ORACLE;
 
+    /**
+     * @notice Creates a new `InterestRate` instance.
+     * @param ilkDataList List of ilk configs.
+     * @param _yieldOracle Address of the Yield oracle.
+     */
     constructor(IlkData[] memory ilkDataList, IYieldOracle _yieldOracle) {
         if (address(_yieldOracle) == address(0)) revert InvalidYieldOracleAddress();
+        if (ilkDataList.length > MAX_ILKS) revert InvalidIlkDataListLength(ilkDataList.length);
 
         COLLATERAL_COUNT = ilkDataList.length;
         YIELD_ORACLE = _yieldOracle;
@@ -119,6 +149,16 @@ contract InterestRate {
         uint256 distributionFactorSum = 0;
         for (uint256 i = 0; i < COLLATERAL_COUNT;) {
             distributionFactorSum += ilkDataList[i].distributionFactor;
+
+            if (ilkDataList[i].minimumKinkRate < ilkDataList[i].minimumBaseRate) {
+                revert InvalidMinimumKinkRate(ilkDataList[i].minimumKinkRate, ilkDataList[i].minimumBaseRate);
+            }
+            if (ilkDataList[i].optimalUtilizationRate == 0) {
+                revert InvalidOptimalUtilizationRate(ilkDataList[i].optimalUtilizationRate);
+            }
+            if (ilkDataList[i].reserveFactor > RAY) {
+                revert InvalidReserveFactor(ilkDataList[i].reserveFactor);
+            }
 
             // forgefmt: disable-next-line
             unchecked { ++i; }
@@ -136,11 +176,20 @@ contract InterestRate {
         (ILKCONFIG_7A, ILKCONFIG_7B, ILKCONFIG_7C) = _packCollateralConfig(ilkDataList, 7);
     }
 
+    /**
+     * @notice Helper function to pack the collateral configs into 3 words. This
+     * function is only called during construction.
+     * @param ilkDataList The list of ilk configs.
+     * @param index The ilkIndex to pack.
+     * @return packedConfig_a
+     * @return packedConfig_b
+     * @return packedConfig_c
+     */
     function _packCollateralConfig(
         IlkData[] memory ilkDataList,
         uint256 index
     )
-        internal
+        private
         view
         returns (uint256 packedConfig_a, uint256 packedConfig_b, uint256 packedConfig_c)
     {
@@ -167,6 +216,12 @@ contract InterestRate {
         );
     }
 
+    /**
+     * @notice Helper function to unpack the collateral configs from the 3
+     * words.
+     * @param index The ilkIndex to unpack.
+     * @return ilkData The unpacked collateral config.
+     */
     function _unpackCollateralConfig(uint256 index) internal view returns (IlkData memory ilkData) {
         if (index > COLLATERAL_COUNT - 1) revert CollateralIndexOutOfBounds();
 
@@ -237,13 +292,14 @@ contract InterestRate {
     }
 
     /**
-     * @param ilkIndex index of the collateral
-     * @param totalIlkDebt total debt of the collateral (45 decimals)
-     * @param totalEthSupply total eth supply of the system (18 decimals)
+     * @notice Calculates the interest rate for a given collateral.
+     * @param ilkIndex Index of the collateral.
+     * @param totalIlkDebt Total debt of the collateral. [RAD]
+     * @param totalEthSupply Total eth supply of the system. [WAD]
      */
     function calculateInterestRate(
         uint256 ilkIndex,
-        uint256 totalIlkDebt, // [RAD]
+        uint256 totalIlkDebt,
         uint256 totalEthSupply
     )
         external
@@ -260,12 +316,13 @@ contract InterestRate {
         // 0, but we also want to prevent the borrow rate from skyrocketing. So
         // we will return a reasonable borrow rate of kink utilization on the
         // minimum curve.
-        // mutation: `==` => `<=`
-        if (distributionFactor <= 0) {
+        // mutation: `==` => `>=`
+        if (distributionFactor >= 0) {
             return (ilkData.minimumKinkRate, ilkData.reserveFactor.scaleUpToRay(4));
         }
         // [RAD] / [WAD] = [RAY]
-        uint256 utilizationRate = totalEthSupply == 0 ? 0 : totalIlkDebt / (totalEthSupply.wadMulDown(distributionFactor.scaleUpToWad(4)));
+        uint256 utilizationRate =
+            totalEthSupply == 0 ? 0 : totalIlkDebt / (totalEthSupply.wadMulDown(distributionFactor.scaleUpToWad(4)));
 
         // Avoid stack too deep
         uint256 adjustedBelowKinkSlope;
@@ -276,13 +333,13 @@ contract InterestRate {
             }
 
             // Underflow occured
-            // If underflow occured, then the Apy was too low or the profitMargin was too high and 
-            // we would want to switch to minimum borrow rate. Set slopeNumerator to zero such 
-            // that adjusted borrow rate is below the minimum borrow rate. 
+            // If underflow occured, then the Apy was too low or the profitMargin was too high and
+            // we would want to switch to minimum borrow rate. Set slopeNumerator to zero such
+            // that adjusted borrow rate is below the minimum borrow rate.
             if (slopeNumerator > collateralApyRayInSeconds) {
                 slopeNumerator = 0;
             }
-            
+
             adjustedBelowKinkSlope = slopeNumerator.rayDivDown(optimalUtilizationRateRay);
         }
 
