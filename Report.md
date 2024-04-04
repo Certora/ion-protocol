@@ -4,7 +4,6 @@
     - [**About Certora**](#about-certora)
     - [**About Ion Protocol**](#about-ion-protocol)
     - [**About Hats Finance**](#about-hats-finance)
-    - [**Summary**](#summary)
 - [**Low Findings (5)**](#low-findings)
     - [**L-01**](#l-01-permanent-pause-of-gemjoin-contract-will-break-contracts-functionality)
     - [**L-02**](#l-02-unhandled-chainlink-revert-would-lock-price-oracle-access-in-ethxspotoraclesolgetprice)
@@ -23,7 +22,8 @@
 
 # Overview
 
-This report compiles the bugs found and properties proven in the Ion Protocol contest in collaboration with Hats Finance. 
+This report compiles the bugs found and properties proven in the Ion Protocol contest. Mutations are used to evaluate the quality of the properties. The mutations are described below and were made available at the end of the contest, you can find them [here](https://github.com/Certora/ion-protocol/blob/master/certora/mutations). Additionally, the top specifications have been added to the [contest repo](https://github.com/Certora/ion-protocol/blob/master) and some specific properties have been included in this report as good examples. You can find the final results for the competition [here](https://docs.google.com/spreadsheets/d/1fiNkz2oucJer0zjV0x4_xlgo6o9HMFlviVQ2Zb5K-CA/edit#gid=1970712821).
+
 
 ## Competition Details
 
@@ -44,10 +44,6 @@ Hats Finance builds autonomous security infrastructure for integration with majo
 ## About Certora
 
 Certora is a Web3 security company that provides industry-leading formal verification tools and smart contract audits. Certora’s flagship security product, Certora Prover, is a unique SaaS product which locates hard-to-find bugs in smart contracts or mathematically proves their absence. A formal verification contest is a competition where members of the community mathematically validate the accuracy of smart contracts, in return for a reward offered by the sponsor based on the participants' findings and property coverage.
-
-## Summary 
-
-In the formal verification contest detailed here, contenders formally verified IonPool smart contracts. Mutations are used to evaluate the quality of the specification. The mutations are described below and were made available at the end of the contest, you can find them [here](https://github.com/Certora/ion-protocol/blob/master/certora/mutations). Additionally, the top specifications have been added to the [contest repo](https://github.com/Certora/ion-protocol/blob/master) and some specific properties have been included in this report as good examples. You can find the final results for the competition [here](https://docs.google.com/spreadsheets/d/1fiNkz2oucJer0zjV0x4_xlgo6o9HMFlviVQ2Zb5K-CA/edit#gid=1970712821).
 
 # Low Findings
 
